@@ -1,0 +1,21 @@
+[package]
+name = "i2m-rs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "gif", "webp"] }
+midly = "0.5.3"
+rand = "0.8"
+rayon = "1.10"
+thiserror = "1"
+resvg = "0.44"
+usvg = "0.44"
+tiny-skia = "0.11"
+
+[dev-dependencies]
+clap = { version = "4", features = ["derive"] }
+
+[[example]]
+name = "cli"
+path = "examples/cli.rs"
