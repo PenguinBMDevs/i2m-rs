@@ -1,7 +1,34 @@
+//! Decode images from disk into [`RgbaImage`].
+
 use crate::error::{Error, Result};
 use crate::image::RgbaImage;
 use std::path::Path;
 
+/// Load an image file.
+///
+/// The decoder is chosen by file extension (case-insensitive):
+///
+/// * `.svg` — parsed with `usvg` and rasterized with `resvg`/`tiny-skia` at
+///   its intrinsic size;
+/// * everything else — decoded by the `image` crate (PNG, JPEG, BMP, GIF,
+///   WebP depending on enabled features) and converted to 8-bit RGBA.
+///
+/// # Errors
+///
+/// * [`Error::Io`] — the file cannot be read.
+/// * [`Error::ImageDecode`] — decoding/parsing failed, or a zero-sized SVG
+///   pixmap could not be allocated.
+///
+/// # Examples
+///
+/// ```no_run
+/// use i2m_rs::load_image;
+/// use std::path::Path;
+///
+/// let img = load_image(Path::new("cover.png"))?;
+/// println!("{}x{} pixels", img.width, img.height);
+/// # Ok::<(), i2m_rs::Error>(())
+/// ```
 pub fn load_image(path: &Path) -> Result<RgbaImage> {
     let ext = path
         .extension()

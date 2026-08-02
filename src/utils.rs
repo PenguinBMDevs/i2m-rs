@@ -1,5 +1,22 @@
+//! Color-space math and pixel utilities.
+//!
+//! Conversions between sRGB and Lab/HSV/HSL, the CIEDE2000 delta-E formula,
+//! deterministic pixel sampling for the clustering algorithms, and small
+//! helpers like [`is_white_key`]. Everything here is pure and allocation-free
+//! except [`sample_pixels`].
+
 use crate::color::{Color, Lab};
 
+/// Clamp `value` into the inclusive range `min..=max`.
+///
+/// # Examples
+///
+/// ```
+/// use i2m_rs::utils::clamp;
+/// assert_eq!(clamp(300, 0, 255), 255);
+/// assert_eq!(clamp(-5, 0, 255), 0);
+/// assert_eq!(clamp(42, 0, 255), 42);
+/// ```
 pub fn clamp<T: PartialOrd>(value: T, min: T, max: T) -> T {
     if value < min {
         min
@@ -10,6 +27,15 @@ pub fn clamp<T: PartialOrd>(value: T, min: T, max: T) -> T {
     }
 }
 
+/// Check whether a MIDI key number is a white piano key (C D E F G A B).
+///
+/// # Examples
+///
+/// ```
+/// use i2m_rs::utils::is_white_key;
+/// assert!(is_white_key(60));  // C4
+/// assert!(!is_white_key(61)); // C#4
+/// ```
 pub fn is_white_key(key: u8) -> bool {
     matches!(key % 12, 0 | 2 | 4 | 5 | 7 | 9 | 11)
 }
@@ -32,6 +58,18 @@ fn lab_f(t: f64) -> f64 {
     }
 }
 
+/// Convert an sRGB color to CIE L\*a\*b\* (D65 white point).
+///
+/// The alpha channel is ignored. Used by Lab-based color matching and the
+/// [`PaletteLabCache`](crate::color::PaletteLabCache).
+///
+/// # Examples
+///
+/// ```
+/// use i2m_rs::{Color, utils::rgb_to_lab};
+/// let lab = rgb_to_lab(Color::new(255, 255, 255, 255));
+/// assert!(lab.l > 95.0); // white is very light
+/// ```
 pub fn rgb_to_lab(color: Color) -> Lab {
     let r = normalize_channel(color.r);
     let g = normalize_channel(color.g);
@@ -52,6 +90,17 @@ pub fn rgb_to_lab(color: Color) -> Lab {
     }
 }
 
+/// Convert an sRGB color to HSV, returning `(h, s, v)` with
+/// `h` in degrees `0..360`, `s` and `v` in `0.0..=1.0`.
+///
+/// # Examples
+///
+/// ```
+/// use i2m_rs::{Color, utils::rgb_to_hsv};
+/// let (h, s, v) = rgb_to_hsv(Color::new(255, 0, 0, 255)); // pure red
+/// assert!(h < 1.0 || h > 359.0);
+/// assert_eq!((s, v), (1.0, 1.0));
+/// ```
 pub fn rgb_to_hsv(color: Color) -> (f64, f64, f64) {
     let r = color.r as f64 / 255.0;
     let g = color.g as f64 / 255.0;
@@ -82,6 +131,8 @@ pub fn rgb_to_hsv(color: Color) -> (f64, f64, f64) {
     (h, s, v)
 }
 
+/// Convert an sRGB color to HSL, returning `(h, s, l)` with `h` in degrees
+/// `0..360`, `s` and `l` in `0.0..=1.0`.
 pub fn rgb_to_hsl(color: Color) -> (f64, f64, f64) {
     let r = color.r as f64 / 255.0;
     let g = color.g as f64 / 255.0;
@@ -114,12 +165,30 @@ pub fn rgb_to_hsl(color: Color) -> (f64, f64, f64) {
     (h * 360.0, s, l)
 }
 
+/// Pack a color's HSL into a single sortable key: hue dominates, then
+/// saturation, then lightness.
+///
+/// Used by [`crate::cluster::sort_palette_by_hsl`] to give palettes a stable,
+/// pleasant ordering (mirrors the original C# `RgbToHslKey`).
 pub fn rgb_to_hsl_key(color: Color) -> f64 {
     let (h, s, l) = rgb_to_hsl(color);
     // C# RgbToHslKey normalizes hue to [0, 1).
     (h / 360.0) * 10_000.0 + s * 100.0 + l
 }
 
+/// Deterministically pick up to `max_samples` **opaque** (`a >= 128`) pixels.
+///
+/// If there are fewer opaque pixels than `max_samples`, all of them are
+/// returned; otherwise every `len / max_samples`-th pixel is taken. Used by
+/// all clustering algorithms to bound their input size.
+///
+/// # Examples
+///
+/// ```
+/// use i2m_rs::{Color, utils::sample_pixels};
+/// let pixels = vec![Color::BLACK; 1000];
+/// assert_eq!(sample_pixels(&pixels, 10).len(), 10);
+/// ```
 pub fn sample_pixels(pixels: &[Color], max_samples: usize) -> Vec<Color> {
     let opaque: Vec<Color> = pixels.iter().filter(|c| c.a >= 128).copied().collect();
 
@@ -135,6 +204,10 @@ pub fn sample_pixels(pixels: &[Color], max_samples: usize) -> Vec<Color> {
     opaque.into_iter().step_by(step).take(max_samples).collect()
 }
 
+/// CIEDE2000 color difference (ΔE\*₀₀) between two Lab colors.
+///
+/// Returns `0.0` for identical colors; values below ~1 are generally
+/// imperceptible. Used by [`ColorIdMethod::Ciede2000`](crate::config::ColorIdMethod::Ciede2000).
 pub fn ciede2000(lab1: &Lab, lab2: &Lab) -> f64 {
     const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
 

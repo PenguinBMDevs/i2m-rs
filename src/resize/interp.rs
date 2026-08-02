@@ -1,30 +1,44 @@
+//! Kernel-based interpolation filters (bilinear, bicubic, Lanczos, Gaussian,
+//! Mitchell, Hermite).
+//!
+//! All filters share the same skeleton: [`generic_sample`] maps each output
+//! pixel to a fractional source coordinate and hands it to a per-filter
+//! sampler that blends a fixed neighborhood. Out-of-range taps are clamped to
+//! the image edge.
+
 use crate::color::Color;
 use crate::image::RgbaImage;
 
+/// Bilinear interpolation over the nearest 2×2 pixels.
 pub fn bilinear(image: &RgbaImage, new_width: u32, new_height: u32) -> RgbaImage {
     generic_sample(image, new_width, new_height, sample_bilinear)
 }
 
+/// Cubic-convolution interpolation over the nearest 4×4 pixels.
 pub fn bicubic(image: &RgbaImage, new_width: u32, new_height: u32) -> RgbaImage {
     generic_sample(image, new_width, new_height, sample_bicubic)
 }
 
+/// Lanczos filter with window size a = 3 (6×6 taps).
 pub fn lanczos(image: &RgbaImage, new_width: u32, new_height: u32) -> RgbaImage {
     generic_sample(image, new_width, new_height, |img, x, y| {
         sample_lanczos(img, x, y, 3)
     })
 }
 
+/// Gaussian filter with σ = 1.0 and radius 2 (5×5 taps).
 pub fn gaussian(image: &RgbaImage, new_width: u32, new_height: u32) -> RgbaImage {
     generic_sample(image, new_width, new_height, |img, x, y| {
         sample_gaussian(img, x, y, 1.0, 2)
     })
 }
 
+/// Mitchell–Netravali filter with B = C = 1/3 (4×4 taps).
 pub fn mitchell(image: &RgbaImage, new_width: u32, new_height: u32) -> RgbaImage {
     generic_sample(image, new_width, new_height, sample_mitchell)
 }
 
+/// Hermite (smoothstep) interpolation over the nearest 2×2 pixels.
 pub fn hermite(image: &RgbaImage, new_width: u32, new_height: u32) -> RgbaImage {
     generic_sample(image, new_width, new_height, sample_hermite)
 }

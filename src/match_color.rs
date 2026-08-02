@@ -1,9 +1,48 @@
+//! Nearest-palette-color matching.
+//!
+//! After a palette has been generated, every opaque pixel of the resized image
+//! must be mapped onto one palette index (the *color ID*). [`match_pixel`]
+//! dispatches on [`ColorIdMethod`] to one of five distance metrics; the
+//! `find_nearest_*` functions are also public for direct use.
+//!
+//! Transparent pixels (`a < 128`) and empty palettes yield
+//! [`TRANSPARENT_ID`], which the converter turns into silence.
+
 use crate::color::{Color, Palette, PaletteLabCache};
 use crate::config::ColorIdMethod;
 use crate::utils::{ciede2000, rgb_to_hsl, rgb_to_hsv};
 
+/// Color ID meaning "no color": returned for transparent pixels and empty
+/// palettes. Never a valid palette index (all valid IDs are `>= 0`).
 pub const TRANSPARENT_ID: i32 = -2;
 
+/// Match one pixel to its nearest palette entry using the chosen metric.
+///
+/// Returns the palette index (`0..palette.colors.len()`), or
+/// [`TRANSPARENT_ID`] when the pixel is transparent (`a < 128`) or the palette
+/// is empty.
+///
+/// `cache` must be `Some` (built from the *same* palette) when `method` is
+/// [`ColorIdMethod::Lab`] or [`ColorIdMethod::Ciede2000`]; it is ignored for
+/// the other methods and may be `None`.
+///
+/// # Panics
+///
+/// Panics if a Lab-based method is selected but `cache` is `None`.
+///
+/// # Examples
+///
+/// ```
+/// use i2m_rs::{Color, ColorIdMethod, Palette};
+/// use i2m_rs::match_color::{match_pixel, TRANSPARENT_ID};
+///
+/// let palette = Palette::new(vec![Color::BLACK, Color::new(255, 255, 255, 255)]);
+///
+/// // Dark gray is nearer to black (index 0):
+/// assert_eq!(match_pixel(Color::new(40, 40, 40, 255), &palette, ColorIdMethod::Rgb, None), 0);
+/// // Transparent pixels never match:
+/// assert_eq!(match_pixel(Color::new(255, 0, 0, 0), &palette, ColorIdMethod::Rgb, None), TRANSPARENT_ID);
+/// ```
 pub fn match_pixel(
     color: Color,
     palette: &Palette,
@@ -32,6 +71,8 @@ pub fn match_pixel(
     }
 }
 
+/// Index of the palette entry with the smallest squared Euclidean RGB
+/// distance to `color`. The fastest metric; ties resolve to the lower index.
 pub fn find_nearest_rgb(color: Color, palette: &Palette) -> usize {
     let (r, g, b) = (i32::from(color.r), i32::from(color.g), i32::from(color.b));
     let mut best = 0;
@@ -51,6 +92,10 @@ pub fn find_nearest_rgb(color: Color, palette: &Palette) -> usize {
     best
 }
 
+/// Index of the palette entry nearest in HSV space.
+///
+/// Low-value or low-saturation pixels are matched mostly by value/saturation;
+/// otherwise hue distance (circular) is weighted highest.
 pub fn find_nearest_hsv(color: Color, palette: &Palette) -> usize {
     let (h1, s1, v1) = rgb_to_hsv(color);
     let mut best = 0;
@@ -68,6 +113,10 @@ pub fn find_nearest_hsv(color: Color, palette: &Palette) -> usize {
     best
 }
 
+/// Index of the palette entry nearest in HSL space.
+///
+/// Dark or desaturated pixels are matched by lightness alone; otherwise hue
+/// distance (circular) is weighted highest.
 pub fn find_nearest_hsl(color: Color, palette: &Palette) -> usize {
     let (h1, s1, l1) = rgb_to_hsl(color);
     let mut best = 0;
@@ -85,6 +134,8 @@ pub fn find_nearest_hsl(color: Color, palette: &Palette) -> usize {
     best
 }
 
+/// Index of the palette entry nearest in Lab space, using the pre-computed
+/// `cache` for the palette side.
 pub fn find_nearest_lab(color: Color, _palette: &Palette, cache: &PaletteLabCache) -> usize {
     let lab = crate::utils::rgb_to_lab(color);
     let mut best = 0;
@@ -104,6 +155,8 @@ pub fn find_nearest_lab(color: Color, _palette: &Palette, cache: &PaletteLabCach
     best
 }
 
+/// Index of the palette entry with the smallest CIEDE2000 ΔE, using the
+/// pre-computed `cache` for the palette side. Slowest but most perceptual.
 pub fn find_nearest_ciede2000(color: Color, _palette: &Palette, cache: &PaletteLabCache) -> usize {
     let lab = crate::utils::rgb_to_lab(color);
     let mut best = 0;
