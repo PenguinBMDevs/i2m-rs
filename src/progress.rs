@@ -48,7 +48,7 @@ pub enum Stage {
 /// Receiver for progress updates.
 ///
 /// Implemented automatically for every `Fn(Stage, f64) + Send + Sync`, so a
-//! plain closure is enough — see the module-level example. The trait is
+/// plain closure is enough — see the module-level example. The trait is
 /// object-safe and used as `Option<&dyn Progress>` throughout the crate.
 pub trait Progress: Send + Sync {
     /// Called with the current stage and a completion fraction in

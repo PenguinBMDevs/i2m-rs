@@ -1,10 +1,10 @@
 [package]
 name = "i2m-rs"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Image-to-MIDI converter library ported from ImageToMidi_Modded"
 license = "MIT"
-repository = "https://github.com/Enderman-bm/i2m-rs.git"
+repository = "https://github.com/PenguinBMDevs/i2m-rs.git"
 readme = "README.md"
 keywords = ["midi", "image", "converter", "music", "palette"]
 categories = ["multimedia::images", "multimedia::audio"]
