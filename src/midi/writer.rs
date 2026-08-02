@@ -1,3 +1,6 @@
+//! Serialize [`ConversionResult`](crate::convert::ConversionResult)s into a
+//! standard MIDI file.
+
 use crate::color::Color;
 use crate::config::ConverterConfig;
 use crate::convert::ConversionResult;
@@ -13,6 +16,43 @@ struct PendingEvent {
     payload_index: Option<usize>,
 }
 
+/// Write one or more conversion results as a Format-1 (parallel) `.mid` file.
+///
+/// * **Tracks**: one MIDI track per palette color, taken from
+///   `results[0].track_events` (all results must share the same track count —
+///   in practice, results produced with the same palette size).
+/// * **Chaining**: multiple results are appended back-to-back in time; each
+///   result starts after `height * ticks_per_pixel` ticks of the previous one,
+///   on top of [`ConverterConfig::start_offset`].
+/// * **Timing**: event ticks (pixel-ticks) are multiplied by
+///   [`ConverterConfig::ticks_per_pixel`] (clamped to at least 1); the header
+///   uses [`ConverterConfig::ppq`]; one tempo meta event computed from
+///   [`ConverterConfig::bpm`] is inserted at tick 0 of track 0.
+/// * **Color events**: if [`ConverterConfig::emit_color_events`] is set, each
+///   track starts with a meta event carrying its color (see
+///   [`color_event_payload`]).
+///
+/// # Errors
+///
+/// * [`Error::Midi`] — `results` is empty, the first result has no tracks, or
+///   serialization/writing failed.
+///
+/// # Examples
+///
+/// ```no_run
+/// use i2m_rs::{ConverterConfig, convert, load_image, Palette, Color};
+/// use i2m_rs::midi::writer::write_midi;
+/// use std::path::Path;
+/// use std::sync::atomic::AtomicBool;
+///
+/// let image = load_image(Path::new("input.png"))?;
+/// let palette = Palette::new(vec![Color::BLACK]);
+/// let config = ConverterConfig::default();
+/// let cancel = AtomicBool::new(false);
+/// let result = convert(&image, &palette, &config, None, &cancel)?;
+/// write_midi(Path::new("out.mid"), &[&result], &config)?;
+/// # Ok::<(), i2m_rs::Error>(())
+/// ```
 pub fn write_midi(
     path: &Path,
     results: &[&ConversionResult],
@@ -119,6 +159,27 @@ pub fn write_midi(
     Ok(())
 }
 
+/// Build the payload bytes of a track-color meta event.
+///
+/// Layout (8 bytes):
+///
+/// | Bytes | Meaning |
+/// |-------|---------|
+/// | `[0, 15, track % 16, 0]` | prefix: color-event marker + channel slot |
+/// | `[r, g, b, a]` | the track's RGBA color |
+///
+/// The writer emits it as a meta event of type `0x0A`. Custom MIDI players
+/// can read this to colorize tracks the same way the source image looked.
+///
+/// # Examples
+///
+/// ```
+/// use i2m_rs::{Color, midi::writer::color_event_payload};
+///
+/// let payload = color_event_payload(2, Color::new(255, 0, 128, 255));
+/// assert_eq!(&payload[0..4], &[0x00, 0x0F, 0x02, 0x00]);
+/// assert_eq!(&payload[4..], &[255, 0, 128, 255]);
+/// ```
 pub fn color_event_payload(track: usize, color: Color) -> Vec<u8> {
     vec![
         0x00,
