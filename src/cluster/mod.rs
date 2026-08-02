@@ -1,3 +1,26 @@
+//! Palette generation: reduce an image to `color_count` representative colors.
+//!
+//! [`generate_palette`] dispatches on [`PaletteSource`](crate::config::PaletteSource)
+//! to one of the algorithm submodules:
+//!
+//! | Submodule | Algorithms | Idea |
+//! |-----------|------------|------|
+//! | [`kmeans`] | K-Means, K-Means++, native K-Means, Max-Min | iterative center refinement in RGB |
+//! | [`lab`] | Lab K-Means | K-Means in perceptual Lab space |
+//! | [`spatial`] | Popularity, Octree, VarianceSplit | histogram / tree / box-split methods |
+//! | [`density`] | MeanShift, DBSCAN, OPTICS | density-based clustering |
+//! | [`gmm`] | GMM | EM with diagonal covariance |
+//! | [`hierarchy`] | Hierarchical | agglomerative single-linkage |
+//! | [`spectral`] | Spectral | KNN graph + eigen-embedding |
+//! | [`dither`] | Floyd–Steinberg, ordered Bayer | quantize *and* dither the image |
+//! | [`fixed`] | Fixed-bit palettes | classic 2/4/16-color or bit-allocated palettes |
+//!
+//! All algorithms operate on a deterministic sample of at most ~20 000 opaque
+//! pixels ([`sample_colors`]), so very large images stay fast and results are
+//! reproducible. Returned palettes are sorted by hue
+//! ([`sort_palette_by_hsl`]) and padded with black / truncated to exactly
+//! `color_count` entries ([`pad_or_truncate_palette`]).
+
 use crate::color::{Color, Palette};
 use crate::config::PaletteSource;
 use crate::error::{Error, Result};
@@ -27,12 +50,40 @@ use spectral::spectral;
 /// Maximum number of opaque pixels used by most clustering algorithms.
 const DEFAULT_MAX_SAMPLES: usize = 20_000;
 
-/// Generate a palette from an image using the requested `PaletteSource`.
+/// Generate a palette from an image using the requested [`PaletteSource`].
 ///
-/// Returns the palette and, for dithering methods, the dithered image.
+/// Returns the palette and, for the two dithering methods
+/// ([`PaletteSource::FloydSteinbergDither`], [`PaletteSource::OrderedDither`]),
+/// additionally the dithered image (`Ok((palette, Some(dithered)))`); all
+/// other methods return `None` as the second element.
+///
+/// The palette is sorted by hue and adjusted to exactly `color_count` entries.
+/// Note that [`PaletteSource::Manual`] simply echoes the given colors back
+/// (then still sorted/padded); skip this function entirely and use the manual
+/// palette directly if that is not desired.
 ///
 /// # Errors
-/// Returns `Error::PaletteGeneration` if `color_count` is zero.
+///
+/// Returns [`Error::PaletteGeneration`] if `color_count` is zero.
+///
+/// # Examples
+///
+/// ```
+/// use i2m_rs::{Color, RgbaImage, PaletteSource};
+/// use i2m_rs::cluster::generate_palette;
+///
+/// // Two half-images: red left, blue right.
+/// let mut img = RgbaImage::new(8, 8, Color::new(255, 0, 0, 255));
+/// for y in 0..8 {
+///     for x in 4..8 {
+///         img.set(x, y, Color::new(0, 0, 255, 255));
+///     }
+/// }
+///
+/// let (palette, dithered) = generate_palette(&img, &PaletteSource::Popularity, 2).unwrap();
+/// assert!(dithered.is_none());
+/// assert_eq!(palette.colors.len(), 2); // red and blue
+/// ```
 pub fn generate_palette(
     image: &RgbaImage,
     source: &PaletteSource,
@@ -89,6 +140,9 @@ pub fn generate_palette(
 }
 
 /// Sort palette colors by a HSL-derived key (hue, then saturation, then lightness).
+///
+/// Gives every generated palette a stable, pleasing track order independent of
+/// the clustering algorithm's output order.
 pub fn sort_palette_by_hsl(colors: &mut [Color]) {
     colors.sort_by(|a, b| {
         let key_a = crate::utils::rgb_to_hsl_key(*a);
@@ -100,6 +154,10 @@ pub fn sort_palette_by_hsl(colors: &mut [Color]) {
 }
 
 /// Pad a palette with black or truncate it to exactly `color_count` colors.
+///
+/// Clustering algorithms may return fewer colors than requested (e.g. an image
+/// with fewer distinct colors); the converter expects the palette size to
+/// match the track count, so it is normalized here.
 pub fn pad_or_truncate_palette(colors: &mut Vec<Color>, color_count: usize) {
     colors.truncate(color_count);
     while colors.len() < color_count {
