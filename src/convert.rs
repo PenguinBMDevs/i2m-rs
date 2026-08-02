@@ -1,3 +1,13 @@
+//! The core image → note-events conversion.
+//!
+//! [`convert`] takes a decoded image plus a palette, resizes the image so its
+//! width equals the number of usable MIDI keys, then scans it **bottom to top**
+//! (like a piano roll rolling upwards): each column is one key, each row step
+//! advances time by one pixel-tick, and every maximal vertical run of one
+//! color becomes one note. Events are grouped per color into
+//! [`ConversionResult::track_events`], ready for
+//! [`write_midi`](crate::midi::writer::write_midi).
+
 use crate::color::{Color, Palette, PaletteLabCache};
 use crate::config::{ColorIdMethod, ConverterConfig, KeyMode, NoteLengthMode};
 use crate::error::{Error, Result};
@@ -10,15 +20,76 @@ use crate::resize::resize;
 use crate::utils::is_white_key;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+/// The outcome of a single [`convert`] call.
+///
+/// # Examples
+///
+/// ```
+/// use i2m_rs::{Color, ConversionResult, ConverterConfig, Palette, convert};
+/// use i2m_rs::image::RgbaImage;
+/// use i2m_rs::config::PaletteSource;
+/// use std::sync::atomic::AtomicBool;
+///
+/// // A 1x2 solid red image, one-color palette, one key (C4):
+/// let image = RgbaImage::new(1, 2, Color::new(255, 0, 0, 255));
+/// let palette = Palette::new(vec![Color::new(255, 0, 0, 255)]);
+/// let config = ConverterConfig {
+///     color_count: 1,
+///     palette: PaletteSource::Manual(palette.colors.clone()),
+///     start_key: 60,
+///     end_key: 60,
+///     target_height: 2,
+///     ..Default::default()
+/// };
+/// let cancel = AtomicBool::new(false);
+/// let result = convert(&image, &palette, &config, None, &cancel).unwrap();
+/// assert_eq!(result.note_count, 1); // one note, 2 ticks long
+/// ```
 #[derive(Clone, Debug, Default)]
 pub struct ConversionResult {
+    /// Total number of notes (note-on events) across all tracks.
     pub note_count: usize,
+    /// `note_count_per_color[i]` = notes in track `i`.
     pub note_count_per_color: Vec<usize>,
+    /// Timed events per color track; `track_events[i]` belongs to
+    /// `palette[i]`. Event ticks are in *pixel-ticks* (rows); multiply by
+    /// [`ConverterConfig::ticks_per_pixel`] for MIDI ticks.
     pub track_events: Vec<Vec<TimedMidiEvent>>,
+    /// Height of the resized image in pixels — the total duration in
+    /// pixel-ticks.
     pub height: u32,
+    /// The palette used for this conversion (clone of the input).
     pub palette: Vec<Color>,
 }
 
+/// Convert one image into timed MIDI events.
+///
+/// Pipeline performed here:
+///
+/// 1. validate config and palette;
+/// 2. build the key list with [`build_key_list`] and compute the target
+///    width (one column per usable key);
+/// 3. [`resize`] the image (height keeps aspect ratio unless
+///    [`ConverterConfig::target_height`] is set);
+/// 4. scan bottom-up: on each color change (or note-length limit hit, see
+///    [`NoteLengthMode`]) close the ringing note with a note-off and open a
+///    new one with a note-on (velocity 1) on the corresponding color track;
+/// 5. close all remaining notes at the top edge.
+///
+/// `progress` (optional) reports [`Stage::GeneratingNotes`] with increasing
+/// fractions. Set `cancel` to `true` from another thread to abort.
+///
+/// # Errors
+///
+/// * [`Error::Config`] — empty palette, `start_key > end_key`, a key range
+///   that yields no usable keys, or a zero-width image when the height must
+///   be derived from the aspect ratio.
+/// * [`Error::Resize`] — the resized image ended up with zero dimensions.
+/// * [`Error::Cancelled`] — `cancel` was set.
+///
+/// # Examples
+///
+/// See [`ConversionResult`].
 pub fn convert(
     image: &RgbaImage,
     palette: &Palette,
@@ -183,6 +254,23 @@ pub fn convert(
     })
 }
 
+/// Build the ordered list of MIDI keys used for the given range and mode.
+///
+/// * [`KeyMode::AllKeys`] and the `Clipped`/`Fixed` modes keep every key in
+///   `start_key..=end_key`.
+/// * [`KeyMode::WhiteKeysFilled`] / [`KeyMode::BlackKeysFilled`] filter to
+///   only white / only black keys, so the image width shrinks to the count
+///   of those keys.
+///
+/// # Examples
+///
+/// ```
+/// use i2m_rs::{KeyMode, convert::build_key_list};
+///
+/// assert_eq!(build_key_list(60, 62, KeyMode::AllKeys), vec![60, 61, 62]);
+/// // 60=C, 61=C#, 62=D, 63=D# — only the white keys survive:
+/// assert_eq!(build_key_list(60, 63, KeyMode::WhiteKeysFilled), vec![60, 62]);
+/// ```
 pub fn build_key_list(start_key: u8, end_key: u8, mode: KeyMode) -> Vec<u8> {
     let mut keys = Vec::new();
     match mode {
