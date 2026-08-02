@@ -1,7 +1,15 @@
+//! Non-kernel resampling filters: area-weighted averaging, nearest neighbor,
+//! box average, integral-image average, and mode pooling.
+
 use crate::color::Color;
 use crate::image::RgbaImage;
 use std::collections::HashMap;
 
+/// Area resampling: each output pixel is the average of the source pixels it
+/// covers, weighted by the covered fraction of each source pixel.
+///
+/// This is the default algorithm — it preserves overall brightness best when
+/// downscaling by large factors.
 pub fn area_resampling(image: &RgbaImage, new_width: u32, new_height: u32) -> RgbaImage {
     let (src_w, src_h) = (image.width as f64, image.height as f64);
     let (dst_w, dst_h) = (new_width as f64, new_height as f64);
@@ -58,6 +66,8 @@ fn overlap(a0: f64, a1: f64, b0: f64, b1: f64) -> f64 {
     (a1.min(b1) - a0.max(b0)).max(0.0)
 }
 
+/// Nearest-neighbor sampling: pick the source pixel closest to the mapped
+/// coordinate. Fastest; preserves hard edges and exact palette colors.
 pub fn nearest_neighbor(image: &RgbaImage, new_width: u32, new_height: u32) -> RgbaImage {
     let (src_w, src_h) = (image.width, image.height);
     let scale_x = f64::from(src_w) / f64::from(new_width);
@@ -79,6 +89,8 @@ pub fn nearest_neighbor(image: &RgbaImage, new_width: u32, new_height: u32) -> R
     out
 }
 
+/// Box filter: unweighted average of all source pixels inside the covered
+/// rectangle.
 pub fn box_filter(image: &RgbaImage, new_width: u32, new_height: u32) -> RgbaImage {
     let (src_w, src_h) = (image.width as f64, image.height as f64);
     let (dst_w, dst_h) = (new_width as f64, new_height as f64);
@@ -122,6 +134,8 @@ pub fn box_filter(image: &RgbaImage, new_width: u32, new_height: u32) -> RgbaIma
     out
 }
 
+/// Box average computed from a summed-area (integral) table — O(1) per output
+/// pixel regardless of the covered rectangle size.
 pub fn integral_image(image: &RgbaImage, new_width: u32, new_height: u32) -> RgbaImage {
     let (src_w, src_h) = (image.width, image.height);
     let scale_x = f64::from(src_w) / f64::from(new_width);
@@ -184,6 +198,9 @@ pub fn integral_image(image: &RgbaImage, new_width: u32, new_height: u32) -> Rgb
     out
 }
 
+/// Mode pooling: the most frequent exact RGBA value inside the covered
+/// rectangle wins. Keeps results on the original color grid (no new blended
+/// colors), which is useful for already-quantized images.
 pub fn mode_pooling(image: &RgbaImage, new_width: u32, new_height: u32) -> RgbaImage {
     let (src_w, src_h) = (image.width as f64, image.height as f64);
     let (dst_w, dst_h) = (new_width as f64, new_height as f64);

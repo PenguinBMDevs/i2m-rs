@@ -1,3 +1,10 @@
+//! Image resizing with 11 selectable algorithms.
+//!
+//! The converter resizes every input so that its width equals the number of
+//! usable MIDI keys (one column per key). [`resize`] dispatches on
+//! [`ResizeAlgorithm`]; the implementations live in the private `interp`
+//! (kernel-based interpolation) and `others` (averaging/sampling) submodules.
+
 use crate::config::ResizeAlgorithm;
 use crate::error::{Error, Result};
 use crate::image::RgbaImage;
@@ -5,6 +12,26 @@ use crate::image::RgbaImage;
 mod interp;
 mod others;
 
+/// Resize `image` to `new_width` × `new_height` using `algorithm`.
+///
+/// If the image already has the target size it is returned unchanged (cloned).
+/// See [`ResizeAlgorithm`] for a description of each filter.
+///
+/// # Errors
+///
+/// Returns [`Error::Resize`] when either target dimension is zero.
+///
+/// # Examples
+///
+/// ```
+/// use i2m_rs::{Color, ResizeAlgorithm, RgbaImage, resize};
+///
+/// let img = RgbaImage::new(4, 4, Color::new(128, 64, 32, 255));
+/// let small = resize(&img, 2, 2, ResizeAlgorithm::AreaResampling).unwrap();
+/// assert_eq!((small.width, small.height), (2, 2));
+/// // A uniform image averages to itself:
+/// assert_eq!(small.get(0, 0), Color::new(128, 64, 32, 255));
+/// ```
 pub fn resize(
     image: &RgbaImage,
     new_width: u32,
